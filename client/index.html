@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Tic Tac Toe Online</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        :root {
+            --x: #38bdf8;
+            --o: #f97316;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: #0f172a;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            font-family: system-ui;
+        }
+
+        .game {
+            width: 100%;
+            max-width: 420px;
+            padding: 20px;
+            background: #020617;
+            border-radius: 16px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ... inputs and buttons inherit width: 100% and box-sizing now ... */
+
+        .board {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+        }
+
+        .cell {
+            aspect-ratio: 1;
+            background: #020617;
+            border: 2px solid #1e293b;
+            border-radius: 12px;
+            font-size: 48px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            animation: pop .2s ease;
+        }
+
+        .cell.x {
+            color: var(--x)
+        }
+
+        .cell.o {
+            color: var(--o)
+        }
+
+        @keyframes pop {
+            from {
+                transform: scale(.7);
+                opacity: .5
+            }
+
+            to {
+                transform: scale(1);
+                opacity: 1
+            }
+        }
+
+        .status {
+            text-align: center;
+            margin: 12px 0
+        }
+
+        .scores {
+            display: flex;
+            justify-content: space-between
+        }
+
+        input,
+        button {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 8px;
+            border-radius: 8px;
+            border: none;
+            font-size: 16px;
+            /* Prevent zoom on mobile */
+        }
+
+        button {
+            background: var(--x);
+            font-weight: bold;
+            cursor: pointer;
+            color: #0f172a;
+        }
+
+        .player-display {
+            display: none;
+            /* Hidden by default */
+            flex-direction: column;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .player-info {
+            display: flex;
+            justify-content: flex-start;
+            /* Aligned to the left */
+            align-items: center;
+            gap: 10px;
+            padding: 5px;
+            height: 40px;
+            /* Match input height roughly */
+        }
+
+        .player-name {
+            font-weight: 500;
+        }
+
+        .avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: #020617;
+            font-size: 14px;
+        }
+
+        .avatar.x {
+            background: var(--x);
+        }
+
+        .avatar.o {
+            background: var(--o);
+        }
+
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            justify-content: center;
+            align-items: center;
+            backdrop-filter: blur(5px);
+            z-index: 100;
+        }
+
+        .modal-content {
+            background: #1e293b;
+            padding: 30px;
+            border-radius: 16px;
+            text-align: center;
+            border: 2px solid #334155;
+            animation: pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+
+        .modal h2 {
+            margin-top: 0;
+            font-size: 32px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="game">
+
+        <input id="p1" placeholder="Player X name">
+        <input id="p2" placeholder="Player O name">
+
+        <div id="players-display" class="player-display">
+            <div class="player-info">
+                <div class="avatar x" id="avatar-x"></div>
+                <span class="player-name" id="name-x"></span>
+            </div>
+            <div class="player-info">
+                <div class="avatar o" id="avatar-o"></div>
+                <span class="player-name" id="name-o"></span>
+            </div>
+        </div>
+
+        <button onclick="startGame()">Start Game</button>
+
+        <div class="scores">
+            <span id="sx">X: 0</span>
+            <span id="so">O: 0</span>
+        </div>
+
+        <div class="status" id="status">Connecting...</div>
+
+        <div class="board" id="board"></div>
+
+    </div>
+
+    <!-- Winner Modal -->
+    <div id="winner-modal" class="modal">
+        <div class="modal-content">
+            <h2 id="winner-text">Width Won!</h2>
+            <button onclick="playAgain()">Play Again</button>
+        </div>
+    </div>
+
+    <!-- Confetti Library -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
+    <script>
+        const boardEl = document.getElementById("board");
+        const statusEl = document.getElementById("status");
+
+        // Sound Controller using Web Audio API
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+        const sounds = {
+            move: () => {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = "sine";
+                osc.frequency.setValueAtTime(440, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.1);
+                gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.1);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.1);
+            },
+            win: () => {
+                const now = audioCtx.currentTime;
+                [0, 0.1, 0.2].forEach((t, i) => {
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    osc.type = "triangle";
+                    osc.frequency.value = 523.25 * (i + 1); // C major ish
+                    gain.gain.setValueAtTime(0.1, now + t);
+                    gain.gain.linearRampToValueAtTime(0, now + t + 0.3);
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
+                    osc.start(now + t);
+                    osc.stop(now + t + 0.3);
+                });
+            },
+            draw: () => {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = "sawtooth";
+                osc.frequency.setValueAtTime(200, audioCtx.currentTime);
+                osc.frequency.linearRampToValueAtTime(100, audioCtx.currentTime + 0.3);
+                gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.3);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.3);
+            }
+        };
+
+        let board = Array(9).fill("");
+        let turn = "X";
+        let scores = { X: 0, O: 0 };
+        let players = {};
+
+        const ws = new WebSocket("ws://localhost:3000");
+
+        ws.onopen = () => {
+            console.log("Connected to WebSocket");
+            statusEl.textContent = "Connected. Waiting for start...";
+            statusEl.style.color = "#4ade80";
+        };
+
+        ws.onmessage = e => {
+            const data = JSON.parse(e.data);
+            if (data.type === "move") applyMove(data.index, data.player);
+            if (data.type === "reset") resetGameLocal();
+        };
+
+        ws.onclose = () => {
+            statusEl.textContent = "Disconnected from server";
+            statusEl.style.color = "#ef4444";
+        };
+
+        ws.onerror = (err) => {
+            console.error("WS Error", err);
+            statusEl.textContent = "Connection Error";
+            statusEl.style.color = "#ef4444";
+        };
+
+        function startGame() {
+            // Resume audio context if suspended (browser policy)
+            if (audioCtx.state === "suspended") audioCtx.resume();
+
+            if (ws.readyState !== WebSocket.OPEN) {
+                alert("Not connected to server!");
+                return;
+            }
+
+            const p1Input = document.getElementById("p1");
+            const p2Input = document.getElementById("p2");
+            const startBtn = document.querySelector("button");
+
+            players.X = p1Input.value || "Player X";
+            players.O = p2Input.value || "Player O";
+
+            p1Input.style.display = "none";
+            p2Input.style.display = "none";
+
+            const playersDisplay = document.getElementById("players-display");
+            playersDisplay.style.display = "flex";
+
+            document.getElementById("name-x").textContent = players.X;
+            document.getElementById("name-o").textContent = players.O;
+
+            document.getElementById("avatar-x").textContent = getInitials(players.X);
+            document.getElementById("avatar-o").textContent = getInitials(players.O);
+
+            startBtn.disabled = true;
+            startBtn.textContent = "Game in Progress";
+            startBtn.style.opacity = "0.5";
+            startBtn.style.cursor = "default";
+
+            // Clear board initially
+            boardEl.innerHTML = "";
+            board.fill("");
+            for (let i = 0; i < 9; i++) {
+                const c = document.createElement("div");
+                c.className = "cell";
+                c.onclick = () => makeMove(i);
+                boardEl.appendChild(c);
+            }
+
+            statusEl.textContent = `${players[turn]}'s turn`;
+            statusEl.style.color = "white";
+        }
+
+        function getInitials(name) {
+            return name
+                .split(" ")
+                .map(n => n[0])
+                .join("")
+                .toUpperCase()
+                .slice(0, 2);
+        }
+
+        // Optimized render: only update class and text, don't destroy DOM
+        function renderBoard() {
+            const cells = boardEl.children;
+            board.forEach((v, i) => {
+                const cell = cells[i];
+                // Only update if changed or empty (to prevent overwriting animation if we had one)
+                // But here we just set state
+                cell.className = `cell ${v.toLowerCase()}`;
+                cell.textContent = v;
+            });
+        }
+
+        function makeMove(i) {
+            if (board[i]) return;
+            // Also resume here just in case
+            if (audioCtx.state === "suspended") audioCtx.resume();
+
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: "move", index: i, player: turn }));
+            }
+        }
+
+        function applyMove(i, player) {
+            board[i] = player;
+            sounds.move();
+            renderBoard(); // Updates existing DOM nodes
+
+            if (checkWin(player)) {
+                scores[player]++;
+                sounds.win();
+                statusEl.textContent = `${players[player]} wins!`;
+                updateScores();
+                showWinModal(players[player]);
+                confetti({
+                    particleCount: 150,
+                    spread: 70,
+                    origin: { y: 0.6 }
+                });
+            } else if (!board.includes("")) {
+                sounds.draw();
+                statusEl.textContent = "Draw!";
+                setTimeout(() => showWinModal(null), 1000); // Show modal for draw too? User asked "when one player wins", but good UX usually has draw modal too or auto reset. Let's assume just win for now, or maybe draw modal "It's a Draw".
+            } else {
+                turn = turn === "X" ? "O" : "X";
+                statusEl.textContent = `${players[turn]}'s turn`;
+            }
+        }
+
+        function checkWin(p) {
+            const w = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [2, 5, 8], [0, 4, 8], [2, 4, 6]];
+            return w.some(a => a.every(i => board[i] === p));
+        }
+
+        function updateScores() {
+            sx.textContent = `X: ${scores.X}`;
+            so.textContent = `O: ${scores.O}`;
+        }
+
+        function showWinModal(winnerName) {
+            const modal = document.getElementById("winner-modal");
+            const text = document.getElementById("winner-text");
+            if (winnerName) {
+                text.textContent = `${winnerName} Wins!`;
+            } else {
+                text.textContent = "It's a Draw!";
+            }
+            modal.style.display = "flex";
+        }
+
+        function playAgain() {
+            ws.send(JSON.stringify({ type: "reset" }));
+        }
+
+        function resetGameLocal() {
+            document.getElementById("winner-modal").style.display = "none";
+            board.fill("");
+            turn = "X";
+            renderBoard();
+            statusEl.textContent = `${players.X}'s turn`;
+        }
+    </script>
+</body>
+
+</html>
