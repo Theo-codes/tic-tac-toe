@@ -591,8 +591,9 @@
         }
 
         function updateScores() {
-            document.getElementById("sx").textContent = `X: ${scores.X}`;
-            document.getElementById("so").textContent = `O: ${scores.O}`;
+            const getMedals = (count) => "🥇".repeat(count);
+            document.getElementById("sx").textContent = `X: ${getMedals(scores.X)}`;
+            document.getElementById("so").textContent = `O: ${getMedals(scores.O)}`;
         }
 
         function showWinModal(winnerName) {
