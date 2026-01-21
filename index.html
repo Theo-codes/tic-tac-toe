@@ -329,6 +329,11 @@
                 console.log("Connected to peer");
                 statusEl.textContent = "Connected!";
                 statusEl.style.color = "#4ade80";
+
+                // If we are the host (myPlayer is X), send the start message now that connection is open
+                if (myPlayer === "X") {
+                    conn.send({ type: "start", players: players });
+                }
             });
 
             conn.on('close', () => {
@@ -397,10 +402,7 @@
             const menu = document.getElementById("menu");
 
             // Prepare names
-            if (isHost) {
-                 // Host already has players.X
-                 conn.send({ type: "start", players: players });
-            }
+            // Note: We send the start message in conn.on('open') now to ensure delivery
 
             // UI Updates
             p1Input.style.display = "none";
