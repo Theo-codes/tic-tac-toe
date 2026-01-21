@@ -183,36 +183,60 @@
 
 <body>
     <div class="game">
-
-        <div id="menu">
-            <input id="p1" placeholder="Your Name (Player X)">
-            <button onclick="createGame()">Create Game (Get Code)</button>
-            <div style="height: 10px"></div>
-            <input id="p2" placeholder="Friend's Name (Player O)">
-            <button onclick="joinGame()" style="background: var(--o)">Join Game (Enter Code)</button>
+        <!-- Step 1: Landing Screen -->
+        <div id="landing">
+            <h2>Tic Tac Toe</h2>
+            <button onclick="showCreateSetup()">Create Game</button>
+            <button onclick="showJoinSetup()" style="background: var(--o)">Join Game</button>
         </div>
 
-        <div id="players-display" class="player-display">
-            <div class="player-info">
-                <div class="avatar x" id="avatar-x"></div>
-                <span class="player-name" id="name-x"></span>
+        <!-- Step 2A: Setup Create -->
+        <div id="setup-create" style="display: none;">
+            <h3>Create Game</h3>
+            <input id="create-name" placeholder="Your Name">
+            <button onclick="initCreateGame()">Start Host</button>
+            <button onclick="backToMenu()" style="background: #334155; color: white">Back</button>
+        </div>
+
+        <!-- Step 2B: Setup Join -->
+        <div id="setup-join" style="display: none;">
+            <h3>Join Game</h3>
+            <input id="join-name" placeholder="Your Name">
+            <input id="join-code" placeholder="Enter Game Code (6 chars)">
+            <button onclick="initJoinGame()" style="background: var(--o)">Join</button>
+            <button onclick="backToMenu()" style="background: #334155; color: white">Back</button>
+        </div>
+
+        <!-- Step 3: Waiting / Game Info -->
+        <div id="game-ui" style="display: none;">
+            <div id="waiting-info" style="text-align: center; margin-bottom: 20px; display: none;">
+                <p>Waiting for friend...</p>
+                <p>Share this Code:</p>
+                <div style="font-size: 32px; font-weight: bold; letter-spacing: 2px; margin: 10px 0; color: var(--x);"
+                    id="display-code"></div>
+                <p style="font-size: 12px; opacity: 0.7">(Code copied to clipboard)</p>
             </div>
-            <div class="player-info">
-                <div class="avatar o" id="avatar-o"></div>
-                <span class="player-name" id="name-o"></span>
+
+            <div id="players-display" class="player-display" style="display: flex;">
+                <div class="player-info">
+                    <div class="avatar x" id="avatar-x"></div>
+                    <span class="player-name" id="name-x"></span>
+                </div>
+                <div class="player-info">
+                    <div class="avatar o" id="avatar-o"></div>
+                    <span class="player-name" id="name-o"></span>
+                </div>
             </div>
+
+            <div class="scores" id="scores-area" style="display: none;">
+                <span id="sx">X: 0</span>
+                <span id="so">O: 0</span>
+            </div>
+
+            <div class="status" id="status">Initializing...</div>
+
+            <div class="board" id="board" style="display: none;"></div>
         </div>
-
-        <!-- <button onclick="startGame()">Start Game</button> -->
-
-        <div class="scores">
-            <span id="sx">X: 0</span>
-            <span id="so">O: 0</span>
-        </div>
-
-        <div class="status" id="status">Connecting...</div>
-
-        <div class="board" id="board"></div>
 
     </div>
 
@@ -230,8 +254,16 @@
     <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
 
     <script>
+        // DOM Elements
+        const landingEl = document.getElementById("landing");
+        const setupCreateEl = document.getElementById("setup-create");
+        const setupJoinEl = document.getElementById("setup-join");
+        const gameUiEl = document.getElementById("game-ui");
+        const waitingInfoEl = document.getElementById("waiting-info");
+        const displayCodeEl = document.getElementById("display-code");
         const boardEl = document.getElementById("board");
         const statusEl = document.getElementById("status");
+        const scoresAreaEl = document.getElementById("scores-area");
 
         // Game State
         let board = Array(9).fill("");
@@ -290,50 +322,137 @@
             }
         };
 
-        function initPeer() {
-            peer = new Peer(null, {
-                debug: 2
+        // --- Navigation Functions ---
+        function backToMenu() {
+            landingEl.style.display = "flex";
+            landingEl.style.flexDirection = "column";
+            landingEl.style.gap = "10px";
+            setupCreateEl.style.display = "none";
+            setupJoinEl.style.display = "none";
+            gameUiEl.style.display = "none";
+        }
+
+        function showCreateSetup() {
+            landingEl.style.display = "none";
+            setupCreateEl.style.display = "block";
+        }
+
+        function showJoinSetup() {
+            landingEl.style.display = "none";
+            setupJoinEl.style.display = "block";
+        }
+
+        function generateShortId() {
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+            let result = '';
+            for (let i = 0; i < 6; i++) {
+                result += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            return result;
+        }
+
+        // --- Host Flow ---
+        function initCreateGame() {
+            const nameInput = document.getElementById("create-name");
+            const name = nameInput.value.trim() || "Host";
+            players.X = name;
+            myPlayer = "X";
+
+            setupCreateEl.style.display = "none";
+            gameUiEl.style.display = "block";
+            statusEl.textContent = "Generating Game Code...";
+
+            const shortId = generateShortId();
+
+            // Try to initialize Peer with short ID
+            peer = new Peer(shortId, { debug: 1 });
+
+            peer.on('error', (err) => {
+                console.error("Peer Error:", err);
+                if (err.type === 'unavailable-id') {
+                    // Collision retry
+                    peer.destroy();
+                    setTimeout(initCreateGame, 100);
+                } else {
+                    statusEl.textContent = "Connection Error: " + err.type;
+                }
             });
 
             peer.on('open', (id) => {
                 console.log('My peer ID is: ' + id);
+                waitingInfoEl.style.display = "block";
+                displayCodeEl.textContent = id;
+                navigator.clipboard.writeText(id).catch(e => console.log("Clipboard failed", e));
+
+                statusEl.textContent = "Waiting for player to join...";
+
+                // Set waiting state UI
+                document.getElementById("name-x").textContent = players.X;
+                document.getElementById("name-o").textContent = "Waiting...";
+                document.getElementById("avatar-x").textContent = getInitials(players.X);
+                document.getElementById("avatar-o").textContent = "?";
             });
 
             peer.on('connection', (c) => {
-                // Host receives a connection
                 if (conn && conn.open) {
-                    c.close(); // Only one player allowed
+                    c.close();
                     return;
                 }
                 conn = c;
                 setupConnection();
-                statusEl.textContent = "Friend connected! Starting game...";
-                
-                // Host is always X
-                myPlayer = "X";
-                startGame(true);
-            });
-
-            peer.on('error', (err) => {
-                console.error(err);
-                alert("Connection Error: " + err.type);
             });
         }
 
+        // --- Join Flow ---
+        function initJoinGame() {
+            const nameInput = document.getElementById("join-name");
+            const codeInput = document.getElementById("join-code");
+            const name = nameInput.value.trim() || "Guest";
+            const code = codeInput.value.trim().toUpperCase();
+
+            if (code.length < 1) return alert("Please enter a game code");
+
+            players.O = name;
+            myPlayer = "O";
+
+            setupJoinEl.style.display = "none";
+            gameUiEl.style.display = "block";
+            statusEl.textContent = "Connecting to game...";
+
+            peer = new Peer(null, { debug: 1 }); // Auto-gen ID for client
+
+            peer.on('open', (id) => {
+                conn = peer.connect(code);
+
+                conn.on('open', () => {
+                    // Connection established, send join info
+                    statusEl.textContent = "Connected! Waiting for host...";
+                    conn.send({ type: "join", name: players.O });
+                    setupConnection();
+                });
+
+                // Handle connection failure aggressively
+                setTimeout(() => {
+                    if (!conn || !conn.open) {
+                        statusEl.textContent = "Connection timed out. Check code.";
+                    }
+                }, 5000);
+            });
+
+            peer.on('error', err => {
+                console.error(err);
+                statusEl.textContent = "Connection Failed: " + err.type;
+            });
+        }
+
+        // --- Shared Connection Logic ---
         function setupConnection() {
             conn.on('data', (data) => {
                 handleData(data);
             });
 
             conn.on('open', () => {
-                console.log("Connected to peer");
-                statusEl.textContent = "Connected!";
-                statusEl.style.color = "#4ade80";
-
-                // If we are the host (myPlayer is X), send the start message now that connection is open
-                if (myPlayer === "X") {
-                    conn.send({ type: "start", players: players });
-                }
+                console.log("Connection opened");
             });
 
             conn.on('close', () => {
@@ -344,84 +463,48 @@
         }
 
         function handleData(data) {
-            if (data.type === "start") {
-                // Client receives start info
-                players = data.players;
-                myPlayer = "O"; // Client is O
-                startGame(false);
+            console.log("Received:", data);
+
+            if (data.type === "join") {
+                // Host receives join request
+                if (myPlayer === "X") {
+                    players.O = data.name;
+                    // Send start game signal with full player info
+                    conn.send({ type: "start", players: players });
+                    startActualGame();
+                }
             }
+
+            if (data.type === "start") {
+                // Client receives start signal
+                players = data.players;
+                startActualGame();
+            }
+
             if (data.type === "move") {
                 applyMove(data.index, data.player);
             }
+
             if (data.type === "reset") {
                 resetGameLocal();
             }
         }
 
-        // Initialize Peer on load
-        initPeer();
+        function startActualGame() {
+            waitingInfoEl.style.display = "none";
+            scoresAreaEl.style.display = "flex";
+            boardEl.style.display = "grid";
 
-        function createGame() {
-            if (!peer || !peer.id) return alert("Connecting to network... please wait");
-            
-            const p1Name = document.getElementById("p1").value || "Player X";
-            players.X = p1Name;
-            
-            // Show the code to share
-            prompt("Copy this Game ID and send it to your friend:", peer.id);
-            
-            statusEl.textContent = "Waiting for friend to join...";
-            document.getElementById("menu").style.display = "none";
-        }
-
-        function joinGame() {
-            const friendId = prompt("Enter your friend's Game ID:");
-            if (!friendId) return;
-
-            const p2Name = document.getElementById("p2").value || "Player O";
-            players.O = p2Name;
-
-            conn = peer.connect(friendId);
-            setupConnection();
-            
-            statusEl.textContent = "Connecting to friend...";
-            
-            // Wait for connection to open before sending info
-            conn.on('open', () => {
-                 // Send our name to host
-                 conn.send({ type: "join", name: p2Name });
-            });
-        }
-
-        function startGame(isHost) {
-            // Resume audio context
-            if (audioCtx.state === "suspended") audioCtx.resume();
-
-            const p1Input = document.getElementById("p1");
-            const p2Input = document.getElementById("p2");
-            const menu = document.getElementById("menu");
-
-            // Prepare names
-            // Note: We send the start message in conn.on('open') now to ensure delivery
-
-            // UI Updates
-            p1Input.style.display = "none";
-            p2Input.style.display = "none";
-            menu.style.display = "none";
-
-            const playersDisplay = document.getElementById("players-display");
-            playersDisplay.style.display = "flex";
-
-            // Use defaults if names missing
-            if (!players.X) players.X = "Player X";
-            if (!players.O) players.O = "Player O";
-
+            // Update Player UI
             document.getElementById("name-x").textContent = players.X;
             document.getElementById("name-o").textContent = players.O;
             document.getElementById("avatar-x").textContent = getInitials(players.X);
             document.getElementById("avatar-o").textContent = getInitials(players.O);
 
-            // Clear board
+            // Audio resume
+            if (audioCtx.state === "suspended") audioCtx.resume();
+
+            // Render Board
             boardEl.innerHTML = "";
             board.fill("");
             for (let i = 0; i < 9; i++) {
@@ -435,6 +518,7 @@
             updateStatus();
         }
 
+        // --- Game Logic ---
         function updateStatus() {
             statusEl.textContent = `${players[turn]}'s turn`;
             statusEl.style.color = "white";
@@ -449,13 +533,10 @@
                 .slice(0, 2);
         }
 
-        // Optimized render: only update class and text, don't destroy DOM
         function renderBoard() {
             const cells = boardEl.children;
             board.forEach((v, i) => {
                 const cell = cells[i];
-                // Only update if changed or empty (to prevent overwriting animation if we had one)
-                // But here we just set state
                 cell.className = `cell ${v.toLowerCase()}`;
                 cell.textContent = v;
             });
@@ -464,22 +545,22 @@
         function makeMove(i) {
             if (!gameActive) return;
             if (board[i]) return;
-            if (turn !== myPlayer) return; // Not your turn
+            if (turn !== myPlayer) return;
 
-            // Also resume here just in case
             if (audioCtx.state === "suspended") audioCtx.resume();
 
             if (conn && conn.open) {
                 conn.send({ type: "move", index: i, player: turn });
-                // Apply locally immediately for responsiveness
                 applyMove(i, turn);
+            } else {
+                console.warn("Connection not open", conn);
             }
         }
 
         function applyMove(i, player) {
             board[i] = player;
             sounds.move();
-            renderBoard(); // Updates existing DOM nodes
+            renderBoard();
 
             if (checkWin(player)) {
                 scores[player]++;
@@ -496,7 +577,7 @@
             } else if (!board.includes("")) {
                 sounds.draw();
                 statusEl.textContent = "Draw!";
-                setTimeout(() => showWinModal(null), 1000); 
+                setTimeout(() => showWinModal(null), 1000);
                 gameActive = false;
             } else {
                 turn = turn === "X" ? "O" : "X";
@@ -510,8 +591,8 @@
         }
 
         function updateScores() {
-            sx.textContent = `X: ${scores.X}`;
-            so.textContent = `O: ${scores.O}`;
+            document.getElementById("sx").textContent = `X: ${scores.X}`;
+            document.getElementById("so").textContent = `O: ${scores.O}`;
         }
 
         function showWinModal(winnerName) {
