@@ -184,8 +184,13 @@
 <body>
     <div class="game">
 
-        <input id="p1" placeholder="Player X name">
-        <input id="p2" placeholder="Player O name">
+        <div id="menu">
+            <input id="p1" placeholder="Your Name (Player X)">
+            <button onclick="createGame()">Create Game (Get Code)</button>
+            <div style="height: 10px"></div>
+            <input id="p2" placeholder="Friend's Name (Player O)">
+            <button onclick="joinGame()" style="background: var(--o)">Join Game (Enter Code)</button>
+        </div>
 
         <div id="players-display" class="player-display">
             <div class="player-info">
@@ -198,7 +203,7 @@
             </div>
         </div>
 
-        <button onclick="startGame()">Start Game</button>
+        <!-- <button onclick="startGame()">Start Game</button> -->
 
         <div class="scores">
             <span id="sx">X: 0</span>
@@ -221,10 +226,22 @@
 
     <!-- Confetti Library -->
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <!-- PeerJS for Serverless Multiplayer -->
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
 
     <script>
         const boardEl = document.getElementById("board");
         const statusEl = document.getElementById("status");
+
+        // Game State
+        let board = Array(9).fill("");
+        let turn = "X";
+        let scores = { X: 0, O: 0 };
+        let players = {};
+        let myPlayer = ""; // "X" or "O"
+        let conn = null;
+        let peer = null;
+        let gameActive = false;
 
         // Sound Controller using Web Audio API
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -273,70 +290,136 @@
             }
         };
 
-        let board = Array(9).fill("");
-        let turn = "X";
-        let scores = { X: 0, O: 0 };
-        let players = {};
+        function initPeer() {
+            peer = new Peer(null, {
+                debug: 2
+            });
 
-        const ws = new WebSocket("ws://localhost:3000");
+            peer.on('open', (id) => {
+                console.log('My peer ID is: ' + id);
+            });
 
-        ws.onopen = () => {
-            console.log("Connected to WebSocket");
-            statusEl.textContent = "Connected. Waiting for start...";
-            statusEl.style.color = "#4ade80";
-        };
+            peer.on('connection', (c) => {
+                // Host receives a connection
+                if (conn && conn.open) {
+                    c.close(); // Only one player allowed
+                    return;
+                }
+                conn = c;
+                setupConnection();
+                statusEl.textContent = "Friend connected! Starting game...";
+                
+                // Host is always X
+                myPlayer = "X";
+                startGame(true);
+            });
 
-        ws.onmessage = e => {
-            const data = JSON.parse(e.data);
-            if (data.type === "move") applyMove(data.index, data.player);
-            if (data.type === "reset") resetGameLocal();
-        };
+            peer.on('error', (err) => {
+                console.error(err);
+                alert("Connection Error: " + err.type);
+            });
+        }
 
-        ws.onclose = () => {
-            statusEl.textContent = "Disconnected from server";
-            statusEl.style.color = "#ef4444";
-        };
+        function setupConnection() {
+            conn.on('data', (data) => {
+                handleData(data);
+            });
 
-        ws.onerror = (err) => {
-            console.error("WS Error", err);
-            statusEl.textContent = "Connection Error";
-            statusEl.style.color = "#ef4444";
-        };
+            conn.on('open', () => {
+                console.log("Connected to peer");
+                statusEl.textContent = "Connected!";
+                statusEl.style.color = "#4ade80";
+            });
 
-        function startGame() {
-            // Resume audio context if suspended (browser policy)
-            if (audioCtx.state === "suspended") audioCtx.resume();
+            conn.on('close', () => {
+                statusEl.textContent = "Opponent disconnected";
+                statusEl.style.color = "#ef4444";
+                gameActive = false;
+            });
+        }
 
-            if (ws.readyState !== WebSocket.OPEN) {
-                alert("Not connected to server!");
-                return;
+        function handleData(data) {
+            if (data.type === "start") {
+                // Client receives start info
+                players = data.players;
+                myPlayer = "O"; // Client is O
+                startGame(false);
             }
+            if (data.type === "move") {
+                applyMove(data.index, data.player);
+            }
+            if (data.type === "reset") {
+                resetGameLocal();
+            }
+        }
+
+        // Initialize Peer on load
+        initPeer();
+
+        function createGame() {
+            if (!peer || !peer.id) return alert("Connecting to network... please wait");
+            
+            const p1Name = document.getElementById("p1").value || "Player X";
+            players.X = p1Name;
+            
+            // Show the code to share
+            prompt("Copy this Game ID and send it to your friend:", peer.id);
+            
+            statusEl.textContent = "Waiting for friend to join...";
+            document.getElementById("menu").style.display = "none";
+        }
+
+        function joinGame() {
+            const friendId = prompt("Enter your friend's Game ID:");
+            if (!friendId) return;
+
+            const p2Name = document.getElementById("p2").value || "Player O";
+            players.O = p2Name;
+
+            conn = peer.connect(friendId);
+            setupConnection();
+            
+            statusEl.textContent = "Connecting to friend...";
+            
+            // Wait for connection to open before sending info
+            conn.on('open', () => {
+                 // Send our name to host
+                 conn.send({ type: "join", name: p2Name });
+            });
+        }
+
+        function startGame(isHost) {
+            // Resume audio context
+            if (audioCtx.state === "suspended") audioCtx.resume();
 
             const p1Input = document.getElementById("p1");
             const p2Input = document.getElementById("p2");
-            const startBtn = document.querySelector("button");
+            const menu = document.getElementById("menu");
 
-            players.X = p1Input.value || "Player X";
-            players.O = p2Input.value || "Player O";
+            // Prepare names
+            if (isHost) {
+                 // Host already has players.X
+                 conn.send({ type: "start", players: players });
+            }
 
+            // UI Updates
             p1Input.style.display = "none";
             p2Input.style.display = "none";
+            menu.style.display = "none";
 
             const playersDisplay = document.getElementById("players-display");
             playersDisplay.style.display = "flex";
 
+            // Use defaults if names missing
+            if (!players.X) players.X = "Player X";
+            if (!players.O) players.O = "Player O";
+
             document.getElementById("name-x").textContent = players.X;
             document.getElementById("name-o").textContent = players.O;
-
             document.getElementById("avatar-x").textContent = getInitials(players.X);
             document.getElementById("avatar-o").textContent = getInitials(players.O);
 
-            startBtn.disabled = true;
-            startBtn.textContent = "Game in Progress";
-            startBtn.style.opacity = "0.5";
-            startBtn.style.cursor = "default";
-
-            // Clear board initially
+            // Clear board
             boardEl.innerHTML = "";
             board.fill("");
             for (let i = 0; i < 9; i++) {
@@ -346,12 +429,17 @@
                 boardEl.appendChild(c);
             }
 
+            gameActive = true;
+            updateStatus();
+        }
+
+        function updateStatus() {
             statusEl.textContent = `${players[turn]}'s turn`;
             statusEl.style.color = "white";
         }
 
         function getInitials(name) {
-            return name
+            return (name || "P")
                 .split(" ")
                 .map(n => n[0])
                 .join("")
@@ -372,12 +460,17 @@
         }
 
         function makeMove(i) {
+            if (!gameActive) return;
             if (board[i]) return;
+            if (turn !== myPlayer) return; // Not your turn
+
             // Also resume here just in case
             if (audioCtx.state === "suspended") audioCtx.resume();
 
-            if (ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: "move", index: i, player: turn }));
+            if (conn && conn.open) {
+                conn.send({ type: "move", index: i, player: turn });
+                // Apply locally immediately for responsiveness
+                applyMove(i, turn);
             }
         }
 
@@ -397,13 +490,15 @@
                     spread: 70,
                     origin: { y: 0.6 }
                 });
+                gameActive = false;
             } else if (!board.includes("")) {
                 sounds.draw();
                 statusEl.textContent = "Draw!";
-                setTimeout(() => showWinModal(null), 1000); // Show modal for draw too? User asked "when one player wins", but good UX usually has draw modal too or auto reset. Let's assume just win for now, or maybe draw modal "It's a Draw".
+                setTimeout(() => showWinModal(null), 1000); 
+                gameActive = false;
             } else {
                 turn = turn === "X" ? "O" : "X";
-                statusEl.textContent = `${players[turn]}'s turn`;
+                updateStatus();
             }
         }
 
@@ -429,7 +524,10 @@
         }
 
         function playAgain() {
-            ws.send(JSON.stringify({ type: "reset" }));
+            if (conn && conn.open) {
+                conn.send({ type: "reset" });
+                resetGameLocal();
+            }
         }
 
         function resetGameLocal() {
@@ -437,7 +535,8 @@
             board.fill("");
             turn = "X";
             renderBoard();
-            statusEl.textContent = `${players.X}'s turn`;
+            gameActive = true;
+            updateStatus();
         }
     </script>
 </body>
